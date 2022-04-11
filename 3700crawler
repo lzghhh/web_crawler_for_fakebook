@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+
+import argparse
+import socket
+import ssl
+from collections import deque
+from html.parser import HTMLParser
+
+DEFAULT_SERVER = "project5.3700.network"
+DEFAULT_PORT = 443
+visited_people = []
+unvisited_people = deque()
+
+class Crawler:
+    def __init__(self, args):
+        self.server = args.server
+        self.port = args.port
+        self.username = args.username
+        self.password = args.password
+        self.link_storage = {}
+        self.cookie = None
+        self.cookie_storage = {'csrftoken': [], 'sessionid': []}
+
+
+    def error_status(self, data):
+        # The status_processor determines whether there are any error message in the HTTP.
+        seperated_http = data.decode('ascii').split("\r\n")
+        status_code = (seperated_http[0].split(" "))[1]
+        if status_code != "200" and status_code != "302":
+            return True
+        return False
+
+    def cookie_finder(self, data):
+        seperated_http = data.decode('ascii').split("\r\n")
+        for x in range(len(seperated_http)):
+            if seperated_http[x].startswith("Set-Cookie: "):
+                cookie_messages = seperated_http[x].split(" ")
+                for y in range(len(cookie_messages)):
+                    if cookie_messages[y].startswith("csrftoken="):
+                        if cookie_messages[y][10:-1] not in self.cookie_storage['csrftoken']:
+                            self.cookie_storage['csrftoken'].append(cookie_messages[y][10:-1])
+                    elif cookie_messages[y].startswith("sessionid="):
+                        if cookie_messages[y][10:-1] not in self.cookie_storage['sessionid']:
+                            self.cookie_storage['sessionid'].append(cookie_messages[y][10:-1])
+
+    def initial_login(self, mysocket):
+
+        login_url = "/accounts/login/?next=/fakebook/"
+        request = ("GET %s HTTP/1.1\n" % login_url) + ("Host: %s\n" % DEFAULT_SERVER) + "Connection: keep-alive\n\n"
+        mysocket.send(request.encode('ascii'))
+        message = mysocket.recv(4096)
+        while self.error_status(message):
+            mysocket.send(request.encode('ascii'))
+            message = mysocket.recv(4096)
+        seperated_http = message.decode('ascii').split("\r\n")
+        for x in range(len(seperated_http)):
+            if seperated_http[x].startswith("Set-Cookie: "):
+                cookie_messages = seperated_http[x].split(" ")
+                for y in range(len(cookie_messages)):
+                    if cookie_messages[y].startswith("csrftoken="):
+                        self.cookie = cookie_messages[y][10:-1]
+        login_info = "username=" + self.username + "&password=" + self.password + '&csrfmiddlewaretoken=' + \
+                     str(self.cookie) + '&next=%2Ffakebook%2F'
+        login_request = ("POST %s HTTP/1.1\n" % login_url) + ("Host: %s\n" % DEFAULT_SERVER) + \
+                        ("Cookie: csrftoken=%s\n" % self.cookie) + \
+                        "Connection: keep-alive\n" + "Content-type: application/x-www-form-urlencoded\n" + \
+                        ("Content-Length: %d\n\n" % len(login_info)) + login_info + "\n\n"
+        mysocket.send(login_request.encode('ascii'))
+        after_login = mysocket.recv(4096)
+        while self.error_status(after_login):
+            mysocket.send(login_request.encode('ascii'))
+            after_login = mysocket.recv(4096)
+        self.cookie_finder(after_login)
+
+    def cookie_generator(self):
+        cookie_message = ""
+        for x in self.cookie_storage.keys():
+            cookie_message += str(x) + "="
+            for cookies in self.cookie_storage[x]:
+                cookie_message += str(cookies)
+            cookie_message += "; "
+        return cookie_message
+
+    def run(self):
+        if self.server is None or self.port is None:
+            self.server = DEFAULT_SERVER
+            self.port = DEFAULT_PORT
+        request = "GET / HTTP/1.1\n" + ("Host: %s\n" % DEFAULT_SERVER) + "Connection: keep-alive\n\n"
+        setting = ssl.create_default_context()
+        mysocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        mysocket = setting.wrap_socket(mysocket, server_hostname=self.server)
+        mysocket.connect((self.server, self.port))
+        mysocket.send(request.encode('ascii'))
+        data = mysocket.recv(4096)
+        while self.error_status(data):
+            mysocket.send(request.encode('ascii'))
+            data = mysocket.recv(4096)
+        real_data = data.decode('ascii')
+
+        self.initial_login(mysocket)
+        request = "GET / HTTP/1.1\n" + ("Host: %s\n" % DEFAULT_SERVER) + ("Cookie: %s\n" % self.cookie_generator()) \
+                  + "Connection: keep-alive\n\n"
+
+        mysocket.send(request.encode('ascii'))
+        after_login = mysocket.recv(4096)
+        while self.error_status(after_login):
+            mysocket.send(request.encode('ascii'))
+            after_login = mysocket.recv(4096)
+
+        deep_request = "GET /fakebook/ HTTP/1.1\n" + ("Host: %s\n" % DEFAULT_SERVER) + \
+                       ("Cookie: %s\n" % self.cookie_generator()) + "Connection: keep-alive\n\n"
+        mysocket.send(deep_request.encode('ascii'))
+        deep_request_home = mysocket.recv(4096)
+        while self.error_status(deep_request_home):
+            mysocket.send(deep_request.encode('ascii'))
+            deep_request_home = mysocket.recv(4096)
+
+        httpparser = MyHTMLParser()
+        httpparser.feed(deep_request_home.decode('ascii'))
+        while unvisited_people:
+            single_round_visit = unvisited_people.popleft()
+
+            if single_round_visit not in visited_people:
+                visited_people.append(single_round_visit)
+                deep_request = ("GET /fakebook/%s/ HTTP/1.1\n" % single_round_visit ) + \
+                               ("Host: %s\n" % DEFAULT_SERVER) + \
+                               ("Cookie: %s\n" % self.cookie_generator()) + "Connection: keep-alive\n\n"
+
+                mysocket.send(deep_request.encode('ascii'))
+                deep_request_single = mysocket.recv(4096)
+                while self.error_status(deep_request_single):
+                    mysocket.send(deep_request.encode('ascii'))
+                    deep_request_single = mysocket.recv(4096)
+                httpparser.feed(deep_request_single.decode('ascii'))
+                temp_header_list = deep_request_single.decode("ascii").split("\r\n")
+                for x in range(len(temp_header_list)) :
+                    if temp_header_list[x].startswith("Connection: close"):
+                        setting = ssl.create_default_context()
+                        mysocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        mysocket = setting.wrap_socket(mysocket, server_hostname=self.server)
+                        mysocket.connect((self.server, self.port))
+                        break
+
+
+class MyHTMLParser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.secret_flag = False
+        self.secret_flag_count = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            for attr in attrs:
+                if attr[0] == 'href' and attr[1].startswith("/fakebook/"):
+                    if attr[1][10:-1] not in visited_people and  attr[1][10:-1] not in unvisited_people:
+                        unvisited_people.append(attr[1][10:-1])
+
+        if tag == "h3":
+            for attr in attrs:
+                if attr[0] == 'class' and attr[1] == 'secret_flag':
+                    self.secret_flag = True
+                    self.secret_flag_count += 1
+                    break
+
+    def handle_endtag(self, tag):
+        pass
+
+    def handle_data(self, data):
+        if self.secret_flag:
+            print(data[6:])
+            self.secret_flag = False
+        if self.secret_flag_count == 5:
+            exit(0)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='crawl Fakebook')
+    parser.add_argument('-s', dest="server", type=str, default=DEFAULT_SERVER, help="The server to crawl")
+    parser.add_argument('-p', dest="port", type=int, default=DEFAULT_PORT, help="The port to use")
+    parser.add_argument('username', type=str, help="The username to use")
+    parser.add_argument('password', type=str, help="The password to use")
+    args = parser.parse_args()
+    sender = Crawler(args)
+    sender.run()
