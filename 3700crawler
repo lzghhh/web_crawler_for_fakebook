@@ -47,7 +47,8 @@ class Crawler:
     def initial_login(self, mysocket):
 
         login_url = "/accounts/login/?next=/fakebook/"
-        request = ("GET %s HTTP/1.1\n" % login_url) + ("Host: %s\n" % DEFAULT_SERVER) + "Connection: keep-alive\n\n"
+        request = ("GET %s HTTP/1.1\n" % login_url) + ("Host: {}:{}\n".format(self.server, self.port)) + \
+                  "Connection: keep-alive\n\n"
         mysocket.send(request.encode('ascii'))
         message = mysocket.recv(4096)
         while self.error_status(message):
@@ -62,7 +63,7 @@ class Crawler:
                         self.cookie = cookie_messages[y][10:-1]
         login_info = "username=" + self.username + "&password=" + self.password + '&csrfmiddlewaretoken=' + \
                      str(self.cookie) + '&next=%2Ffakebook%2F'
-        login_request = ("POST %s HTTP/1.1\n" % login_url) + ("Host: %s\n" % DEFAULT_SERVER) + \
+        login_request = ("POST %s HTTP/1.1\n" % login_url) + ("Host: {}:{}\n".format(self.server, self.port)) + \
                         ("Cookie: csrftoken=%s\n" % self.cookie) + \
                         "Connection: keep-alive\n" + "Content-type: application/x-www-form-urlencoded\n" + \
                         ("Content-Length: %d\n\n" % len(login_info)) + login_info + "\n\n"
@@ -86,7 +87,7 @@ class Crawler:
         if self.server is None or self.port is None:
             self.server = DEFAULT_SERVER
             self.port = DEFAULT_PORT
-        request = "GET / HTTP/1.1\n" + ("Host: %s\n" % DEFAULT_SERVER) + "Connection: keep-alive\n\n"
+        request = "GET / HTTP/1.1\n" + ("Host: {}:{}\n".format(self.server, self.port)) + "Connection: keep-alive\n\n"
         setting = ssl.create_default_context()
         mysocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         mysocket = setting.wrap_socket(mysocket, server_hostname=self.server)
@@ -99,7 +100,8 @@ class Crawler:
         real_data = data.decode('ascii')
 
         self.initial_login(mysocket)
-        request = "GET / HTTP/1.1\n" + ("Host: %s\n" % DEFAULT_SERVER) + ("Cookie: %s\n" % self.cookie_generator()) \
+        request = "GET / HTTP/1.1\n" + ("Host: {}:{}\n".format(self.server, self.port)) + \
+                  ("Cookie: %s\n" % self.cookie_generator()) \
                   + "Connection: keep-alive\n\n"
 
         mysocket.send(request.encode('ascii'))
@@ -108,7 +110,7 @@ class Crawler:
             mysocket.send(request.encode('ascii'))
             after_login = mysocket.recv(4096)
 
-        deep_request = "GET /fakebook/ HTTP/1.1\n" + ("Host: %s\n" % DEFAULT_SERVER) + \
+        deep_request = "GET /fakebook/ HTTP/1.1\n" + ("Host: {}:{}\n".format(self.server, self.port)) + \
                        ("Cookie: %s\n" % self.cookie_generator()) + "Connection: keep-alive\n\n"
         mysocket.send(deep_request.encode('ascii'))
         deep_request_home = mysocket.recv(4096)
@@ -124,7 +126,7 @@ class Crawler:
             if single_round_visit not in visited_people:
                 visited_people.append(single_round_visit)
                 deep_request = ("GET /fakebook/%s/ HTTP/1.1\n" % single_round_visit ) + \
-                               ("Host: %s\n" % DEFAULT_SERVER) + \
+                               ("Host: {}:{}\n".format(self.server, self.port)) + \
                                ("Cookie: %s\n" % self.cookie_generator()) + "Connection: keep-alive\n\n"
 
                 mysocket.send(deep_request.encode('ascii'))
@@ -168,7 +170,7 @@ class MyHTMLParser(HTMLParser):
 
     def handle_data(self, data):
         if self.secret_flag:
-            sys.stdout.write(data[6:])
+            sys.stdout.write(data[6:] + '\n')
             self.secret_flag = False
         if self.secret_flag_count == 5:
             exit(0)
