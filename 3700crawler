@@ -3,6 +3,7 @@
 import argparse
 import socket
 import ssl
+import sys
 from collections import deque
 from html.parser import HTMLParser
 
@@ -10,6 +11,7 @@ DEFAULT_SERVER = "project5.3700.network"
 DEFAULT_PORT = 443
 visited_people = []
 unvisited_people = deque()
+
 
 class Crawler:
     def __init__(self, args):
@@ -20,7 +22,6 @@ class Crawler:
         self.link_storage = {}
         self.cookie = None
         self.cookie_storage = {'csrftoken': [], 'sessionid': []}
-
 
     def error_status(self, data):
         # The status_processor determines whether there are any error message in the HTTP.
@@ -167,7 +168,7 @@ class MyHTMLParser(HTMLParser):
 
     def handle_data(self, data):
         if self.secret_flag:
-            print(data[6:] + "\n")
+            sys.stdout.write(data[6:] + '\n')
             self.secret_flag = False
         if self.secret_flag_count == 5:
             exit(0)
