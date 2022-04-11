@@ -38,13 +38,13 @@ The program uses BFS to explore the website to find the secret flag.
 
 It will start with one link and record all href link posted on the website and put them in unvisited list (queue). When visiting one page, that page will be popped from the queue and put into visited list. Therefore, when one branch is completed searched, it will go to the next unvisited page in the queue until finding all five secret flags. 
 
-The HTTPParser helps analyze the HTTP content and find all href links under <a> and secret flags under <h3>. 
+The HTTPParser helps analyze the HTTP content and find all href links under /a/ and secret flags under /h3/. 
 
 #### Challenge Faced: 
 
 Debugging in this project is hard since both HTTP headers and HTTP context need to be checked. Therefore, when some problems appeared, all these messages need to be printed out, which is huge after the loop (the login debugging is much more simple). 
 
-Also, the code might run well, but cannot find the secret flags. Since all secret flags are under <h3>, wrong finding logic will cause the flag not to appear (debugging at this point requires to print all HTTP contexts out , but | grep secret flag can make it a little bit easier to find the problem). If a secret flag is found in a HTTP context, using that string and run in another simple code to test will be much easier to do. 
+Also, the code might run well, but cannot find the secret flags. Since all secret flags are under /h3/, wrong finding logic will cause the flag not to appear (debugging at this point requires to print all HTTP contexts out , but | grep secret flag can make it a little bit easier to find the problem). If a secret flag is found in a HTTP context, using that string and run in another simple code to test will be much easier to do. 
 
 At last, the server will automatically close the connection, which is confusing at first. We thought it is the HTTP1.1's chunked encoding problem. However, only closing connection causes receiving empty message in the socket, not HTTP1.1's chunked encoding. Finding this problem from the HTTP header (the last message before the socket closed is marked as "Connection: close") costed some time. 
 
