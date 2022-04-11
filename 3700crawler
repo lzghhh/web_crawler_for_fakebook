@@ -9,7 +9,10 @@ from html.parser import HTMLParser
 
 DEFAULT_SERVER = "project5.3700.network"
 DEFAULT_PORT = 443
+# Current visited pages (stored as the id number).
 visited_people = []
+# Queue for unvisited pages (also stored as the id number).
+# When analyzing the whole page, all links will be added and visit later.
 unvisited_people = deque()
 
 
@@ -19,18 +22,24 @@ class Crawler:
         self.port = args.port
         self.username = args.username
         self.password = args.password
-        self.link_storage = {}
+        # First Cookie received before login.
         self.cookie = None
+        # Received two cookies as csrf token and session id.
         self.cookie_storage = {'csrftoken': [], 'sessionid': []}
 
     def error_status(self, data):
         # The status_processor determines whether there are any error message in the HTTP.
         seperated_http = data.decode('ascii').split("\r\n")
+        # The status appears as "HTTP1.1 200 OK". So splitting it by " " allows to get the status code.
         status_code = (seperated_http[0].split(" "))[1]
+        # Only 200 and 302 are valid response.
+        # Non 200 and 302 code will return a True to resend the request.
         if status_code != "200" and status_code != "302":
             return True
         return False
 
+    # This function is to find the cookie from the response message sent by the server.
+    # Both token (csrftoken and sessionid) will be recorded.
     def cookie_finder(self, data):
         seperated_http = data.decode('ascii').split("\r\n")
         for x in range(len(seperated_http)):
@@ -44,17 +53,22 @@ class Crawler:
                         if cookie_messages[y][10:-1] not in self.cookie_storage['sessionid']:
                             self.cookie_storage['sessionid'].append(cookie_messages[y][10:-1])
 
+    # This function allows the user to start the connection with the server as logging into it.
     def initial_login(self, mysocket):
-
         login_url = "/accounts/login/?next=/fakebook/"
+        # First request to get into the login page.
         request = ("GET %s HTTP/1.1\n" % login_url) + ("Host: {}:{}\n".format(self.server, self.port)) + \
                   "Connection: keep-alive\n\n"
         mysocket.send(request.encode('ascii'))
         message = mysocket.recv(4096)
+        # This while loop allows the sender to detect whether there is any error returned from the server.
+        # If there is a error message, then send it again until received the correct status code.
+        # (Apply to all later similar function as while loop for detecting error status).
         while self.error_status(message):
             mysocket.send(request.encode('ascii'))
             message = mysocket.recv(4096)
         seperated_http = message.decode('ascii').split("\r\n")
+        # Initial cookie that will not be used after logging in.
         for x in range(len(seperated_http)):
             if seperated_http[x].startswith("Set-Cookie: "):
                 cookie_messages = seperated_http[x].split(" ")
@@ -63,6 +77,7 @@ class Crawler:
                         self.cookie = cookie_messages[y][10:-1]
         login_info = "username=" + self.username + "&password=" + self.password + '&csrfmiddlewaretoken=' + \
                      str(self.cookie) + '&next=%2Ffakebook%2F'
+        # Post request using the received temporary token to login in with provided username and password.
         login_request = ("POST %s HTTP/1.1\n" % login_url) + ("Host: {}:{}\n".format(self.server, self.port)) + \
                         ("Cookie: csrftoken=%s\n" % self.cookie) + \
                         "Connection: keep-alive\n" + "Content-type: application/x-www-form-urlencoded\n" + \
@@ -74,6 +89,7 @@ class Crawler:
             after_login = mysocket.recv(4096)
         self.cookie_finder(after_login)
 
+    # Generate the cookie that will be sent in the GET message after logging in.
     def cookie_generator(self):
         cookie_message = ""
         for x in self.cookie_storage.keys():
@@ -88,6 +104,7 @@ class Crawler:
             self.server = DEFAULT_SERVER
             self.port = DEFAULT_PORT
         request = "GET / HTTP/1.1\n" + ("Host: {}:{}\n".format(self.server, self.port)) + "Connection: keep-alive\n\n"
+        # Set up SSL socket connection with the server.
         setting = ssl.create_default_context()
         mysocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         mysocket = setting.wrap_socket(mysocket, server_hostname=self.server)
@@ -98,7 +115,7 @@ class Crawler:
             mysocket.send(request.encode('ascii'))
             data = mysocket.recv(4096)
         real_data = data.decode('ascii')
-
+        # Logging into the server.
         self.initial_login(mysocket)
         request = "GET / HTTP/1.1\n" + ("Host: {}:{}\n".format(self.server, self.port)) + \
                   ("Cookie: %s\n" % self.cookie_generator()) \
@@ -110,6 +127,7 @@ class Crawler:
             mysocket.send(request.encode('ascii'))
             after_login = mysocket.recv(4096)
 
+        # Dig for secret flags by exploring different pages. 
         deep_request = "GET /fakebook/ HTTP/1.1\n" + ("Host: {}:{}\n".format(self.server, self.port)) + \
                        ("Cookie: %s\n" % self.cookie_generator()) + "Connection: keep-alive\n\n"
         mysocket.send(deep_request.encode('ascii'))
@@ -119,8 +137,12 @@ class Crawler:
             deep_request_home = mysocket.recv(4096)
 
         httpparser = MyHTMLParser()
+        # The MyHTMLParser will analyze the HTML content and find all links and put it into the unvisited list. 
+        # If there is a secret flag in the page, the system will print it to stdout. 
         httpparser.feed(deep_request_home.decode('ascii'))
+        # Loop for detecting the secret flags in unvisited pages. 
         while unvisited_people:
+            # When visited one page, pop the page from the unvisited list and put it in visited list. 
             single_round_visit = unvisited_people.popleft()
 
             if single_round_visit not in visited_people:
@@ -134,9 +156,14 @@ class Crawler:
                 while self.error_status(deep_request_single):
                     mysocket.send(deep_request.encode('ascii'))
                     deep_request_single = mysocket.recv(4096)
+                # Analyze the content in the page and if there is new links, add those new links (only people pages)
+                # to the unvisited list. 
                 httpparser.feed(deep_request_single.decode('ascii'))
                 temp_header_list = deep_request_single.decode("ascii").split("\r\n")
-                for x in range(len(temp_header_list)) :
+                # After receiving a message, analyze the HTTP header to check whether the connection is alive or not. 
+                # If the connection is closed, built a new socket and connect to the server. 
+                # Still use the old cookies since it will not expire in a short time. 
+                for x in range(len(temp_header_list)):
                     if temp_header_list[x].startswith("Connection: close"):
                         setting = ssl.create_default_context()
                         mysocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -152,14 +179,18 @@ class MyHTMLParser(HTMLParser):
         self.secret_flag_count = 0
 
     def handle_starttag(self, tag, attrs):
+        # a represents a possible link appears. 
         if tag == "a":
             for attr in attrs:
+                # Only href and starts with fakebook is a valid page that needs to be added into unvisited list. 
                 if attr[0] == 'href' and attr[1].startswith("/fakebook/"):
                     if attr[1][10:-1] not in visited_people and  attr[1][10:-1] not in unvisited_people:
                         unvisited_people.append(attr[1][10:-1])
-
+        # h3 represents a secret flag. 
         if tag == "h3":
             for attr in attrs:
+                # Only first elements in the attrs is class and second one is secret_flag will be marked as a secret 
+                # flag. The flag will be marked as true and print out the secret flag in the data segment. 
                 if attr[0] == 'class' and attr[1] == 'secret_flag':
                     self.secret_flag = True
                     self.secret_flag_count += 1
@@ -169,9 +200,11 @@ class MyHTMLParser(HTMLParser):
         pass
 
     def handle_data(self, data):
+        # When the flag is true, print the secret flag to stdout. 
         if self.secret_flag:
             sys.stdout.write(data[6:] + '\n')
             self.secret_flag = False
+        # If find all 5 flags, exit the program. 
         if self.secret_flag_count == 5:
             exit(0)
 
